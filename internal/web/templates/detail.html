@@ -1,0 +1,37 @@
+{{define "detail"}}
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Lot.Title}} — Скарбник</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1><a href="/" style="color:inherit;text-decoration:none">Скарбник</a></h1>
+    <p>{{.Lot.AuctionID}}</p>
+  </header>
+  <main class="detail">
+    <h2>{{.Lot.Title}}</h2>
+    <p class="muted">{{.Lot.Description}}</p>
+    <dl>
+      <dt>Стартова ціна</dt><dd>{{printf "%.2f" .Lot.StartAmount}} {{.Lot.Currency}}</dd>
+      <dt>Ринок RIA</dt><dd>{{if .Lot.RIAMedian}}{{printf "%.0f" (deref .Lot.RIAMedian)}} грн{{else}}немає оцінки{{end}}</dd>
+      <dt>Знижка</dt><dd>{{if .Lot.Discount}}{{printf "%.0f" (percent .Lot.Discount)}}%{{else}}—{{end}}</dd>
+      <dt>Впевненість</dt><dd>{{printf "%.0f" (mul .Lot.Confidence 100)}}%</dd>
+      <dt>Тип</dt><dd>{{.Lot.Kind}}</dd>
+      <dt>Захід</dt><dd>{{.Lot.Family}} · прохід {{.Lot.PassN}}</dd>
+      <dt>Метод</dt><dd>{{.Lot.SellingMethod}}</dd>
+      <dt>Організатор</dt><dd>{{.Lot.SellingEntity}}</dd>
+      <dt>Статус</dt><dd>{{.Lot.Status}}</dd>
+      <dt>Початок</dt><dd>{{if .Lot.AuctionStart}}{{.Lot.AuctionStart.Local.Format "02.01.2006 15:04"}}{{end}}</dd>
+    </dl>
+    <p><a href="{{.Official}}">Офіційна сторінка на Prozorro.Продажі</a></p>
+  </main>
+  <footer>
+    Ринкові ціни — <a href="https://auto.ria.com/">AUTO.RIA</a> та <a href="https://dom.ria.com/">DIM.RIA</a>.
+  </footer>
+</body>
+</html>
+{{end}}

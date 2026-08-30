@@ -1,0 +1,27 @@
+{{define "rows"}}
+{{if not .Lots}}
+<tr><td colspan="5" class="muted">Поки порожньо. Поллер тягне лоти у фоні — оновіть за хвилину.</td></tr>
+{{end}}
+{{range .Lots}}
+<tr class="{{if lt .Confidence 0.6}}low{{end}}">
+  <td>
+    {{if .Discount}}
+      <span class="disc {{if ge (deref .Discount) 0.25}}good{{else}}warn{{end}}">{{printf "%.0f" (percent .Discount)}}%</span>
+    {{else}}
+      <span class="muted">—</span>
+    {{end}}
+    {{if lt .Confidence 0.6}}<div class="muted">слабка впевненість</div>{{end}}
+  </td>
+  <td>
+    <a href="/lots/{{.ID}}">{{or .Title .AuctionID}}</a>
+    <div class="muted">{{.City}} {{if .Brand}}· {{.Brand}}{{end}} {{if .Year}}· {{.Year}}{{end}} {{if .Rooms}}· {{.Rooms}} кімн.{{end}}</div>
+  </td>
+  <td>{{printf "%.0f" .StartAmount}} {{.Currency}}</td>
+  <td>{{if .RIAMedian}}{{printf "%.0f" (deref .RIAMedian)}} грн{{else}}—{{end}}</td>
+  <td>
+    <span class="tag">{{or .Family "—"}}</span>
+    {{if gt .PassN 1}}<span class="tag">прохід {{.PassN}}</span>{{end}}
+  </td>
+</tr>
+{{end}}
+{{end}}

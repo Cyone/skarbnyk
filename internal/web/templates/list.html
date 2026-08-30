@@ -1,0 +1,64 @@
+{{define "list"}}
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Скарбник</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+</head>
+<body>
+  <header>
+    <h1>Скарбник</h1>
+    <p>Хто сидить на скарбі в державних торгах. Лоти Prozorro.Продажі проти ринку AUTO.RIA / DIM.RIA.</p>
+  </header>
+  <main>
+    <form class="filters" hx-get="/" hx-target="#rows" hx-swap="innerHTML" hx-push-url="true">
+      <label>Тип
+        <select name="type">
+          <option value="">усі</option>
+          <option value="car" {{if eq .Filter.Kind "car"}}selected{{end}}>авто</option>
+          <option value="apt" {{if eq .Filter.Kind "apt"}}selected{{end}}>квартири</option>
+        </select>
+      </label>
+      <label>Місто
+        <input name="city" value="{{.Filter.City}}">
+      </label>
+      <label>Мін. знижка
+        <input name="min" type="number" step="0.05" min="0" max="1" value="{{if .Filter.MinDiscount}}{{.Filter.MinDiscount}}{{end}}">
+      </label>
+      <label>Захід
+        <select name="family">
+          <option value="">усі</option>
+          <option value="english" {{if eq .Filter.Family "english"}}selected{{end}}>англійський</option>
+          <option value="dutch" {{if eq .Filter.Family "dutch"}}selected{{end}}>голландський</option>
+        </select>
+      </label>
+      <label>Прохід
+        <input name="pass" type="number" min="0" value="{{if .Filter.Pass}}{{.Filter.Pass}}{{end}}">
+      </label>
+      <button type="submit">Шукати</button>
+    </form>
+    <table>
+      <thead>
+        <tr>
+          <th>Знижка</th>
+          <th>Лот</th>
+          <th>Старт</th>
+          <th>Ринок</th>
+          <th>Захід</th>
+        </tr>
+      </thead>
+      <tbody id="rows">
+        {{template "rows" .}}
+      </tbody>
+    </table>
+  </main>
+  <footer>
+    Дані торгів — <a href="https://prozorro.sale/">Prozorro.Продажі</a>.
+    Ринкові ціни — <a href="https://auto.ria.com/">AUTO.RIA</a> та <a href="https://dom.ria.com/">DIM.RIA</a>.
+  </footer>
+</body>
+</html>
+{{end}}
