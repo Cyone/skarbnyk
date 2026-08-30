@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "hooks": {
+    "afterFileEdit": [
+      {
+        "command": ".cursor/hooks/gofmt.sh"
+      }
+    ],
+    "stop": [
+      {
+        "command": ".cursor/hooks/go-test.sh",
+        "timeout": 60
+      }
+    ]
+  }
+}

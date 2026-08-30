@@ -1,0 +1,24 @@
+---
+description: Parser and score invariants — tests required, discount math stays put
+globs: internal/parse/**,internal/score/**
+alwaysApply: false
+---
+
+# Parse and score
+
+These packages are the product. A silent classify or discount change ships bad bargains.
+
+- Every new or edited regex, brand, room word, or skip rule gets a case in `parse_test.go`.
+- Do not drop skip rules (lease, land-only, scrap, rights-of-claim) without a failing live example.
+- Houses (`будинок`) still classify as `apt` until the user asks to split them.
+- `score.Discount`: `1 - start/market`. If `market <= 0` or `start < 0`, return `0`.
+- Score the **current** start. Dutch in-auction ticks are not a markdown.
+- `parse_confidence < 0.6` is stored without a market score. Do not score junk to “fill the list”.
+
+```go
+// ❌ BAD — treat a Dutch tick as the new start
+d := score.Discount(tick, market)
+
+// ✅ GOOD — current procedure start only
+d := score.Discount(lot.StartAmount, market)
+```

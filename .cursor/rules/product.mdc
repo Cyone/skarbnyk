@@ -1,0 +1,17 @@
+---
+description: Skarbnyk product boundaries — one binary, no extra surface
+alwaysApply: true
+---
+
+# Product
+
+One Go binary, one Postgres, HTMX UI. Do not grow the surface.
+
+- No new module dependency unless the user names the package.
+- No SETAM scrape, bidding, deposits, auth, accounts, or second frontend.
+- No React/SPA, WASM, extra process, queue, or search engine.
+- `RIA_API_KEY`, `TELEGRAM_BOT_TOKEN`, `DATABASE_URL` stay in env. Never log or commit them.
+- Freemium RIA: cache by spec-hash, not per lot. No paid AI / period series.
+- UI copy stays Ukrainian. List filters stay on `GET /` and `GET /lots/{id}`.
+
+Houses still classify as apartments until the user asks to split them.

@@ -1,0 +1,24 @@
+---
+description: Go conventions matching this repo
+globs: "**/*.go"
+alwaysApply: false
+---
+
+# Go
+
+Match the packages already here. Stdlib first. Small files. Tests live next to the package (`foo_test.go`).
+
+```go
+// ❌ BAD — new assertion library, table helper framework
+require.Equal(t, KindCar, a.Kind)
+
+// ✅ GOOD — same style as parse_test.go
+if a.Kind != KindCar {
+    t.Fatalf("kind=%s", a.Kind)
+}
+```
+
+- `gofmt` on edit. After non-trivial Go changes, run `make test`.
+- Prefer `net/http` ServeMux patterns already in `internal/web`.
+- Wrap errors at trust boundaries (`fmt.Errorf("…: %w", err)`). Do not swallow upsert/poll failures silently beyond existing `log.Printf` + continue.
+- Leave one test that fails if the new logic breaks. Trivial one-liners need none.
