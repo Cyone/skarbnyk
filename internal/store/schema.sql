@@ -64,3 +64,5 @@ CREATE TABLE IF NOT EXISTS scores (
     ria_median    DOUBLE PRECISION,
     scored_at     TIMESTAMPTZ DEFAULT now()
 );
+
+ALTER TABLE scores ADD COLUMN IF NOT EXISTS alerted_at TIMESTAMPTZ;

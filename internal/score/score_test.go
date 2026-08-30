@@ -10,6 +10,9 @@ func TestDiscount(t *testing.T) {
 	if Discount(10, 0) != 0 {
 		t.Fatal("zero market")
 	}
+	if Discount(-1, 100) != 0 {
+		t.Fatal("negative start")
+	}
 }
 
 func TestFamily(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -27,15 +28,16 @@ type Attrs struct {
 }
 
 var (
-	reYear   = regexp.MustCompile(`\b((?:19|20)\d{2})\b`)
-	reRooms  = regexp.MustCompile(`(?i)(\d+)\s*[-–]?\s*кімнат`)
-	reArea   = regexp.MustCompile(`(?i)(\d+(?:[.,]\d+)?)\s*(?:кв\.?\s*м|м²|м2)`)
-	reCity   = regexp.MustCompile(`(?i)(?:м\.|місто)\s*([А-ЯІЇЄҐа-яіїєґ'’\-]+)`)
-	reVIN    = regexp.MustCompile(`(?i)\bVIN\b|[A-HJ-NPR-Z0-9]{13,17}`)
-	reApt    = regexp.MustCompile(`(?i)квартир|кімнатн`)
-	reHouse  = regexp.MustCompile(`(?i)\bбудинок\b`)
-	reCar    = regexp.MustCompile(`(?i)автомобіль|легков(ий|ого)|транспортний засіб|\bавто\b`)
-	reSkip   = regexp.MustCompile(`(?i)право оренди|земельн(а|их|ої) ділян|брухт|металобрухт|право вимоги|майнов(і|их) прав`)
+	reYear     = regexp.MustCompile(`\b((?:19|20)\d{2})\b`)
+	reRooms    = regexp.MustCompile(`(?i)(\d+)\s*[-–]?\s*кімнат`)
+	reArea     = regexp.MustCompile(`(?i)(\d+(?:[.,]\d+)?)\s*(?:кв\.?\s*м|м²|м2)`)
+	reCity     = regexp.MustCompile(`(?i)(?:^|[\s,;(])(?:м\.|місто)\s*([А-ЯІЇЄҐа-яіїєґ'’\-]+)`)
+	reVIN      = regexp.MustCompile(`(?i)\bVIN\b`)
+	reVINCode  = regexp.MustCompile(`\b[A-HJ-NPR-Z0-9]{17}\b`)
+	reApt      = regexp.MustCompile(`(?i)квартир|кімнатн`)
+	reHouse    = regexp.MustCompile(`(?i)будин(ок|ку|ка|ком)`)
+	reCar      = regexp.MustCompile(`(?i)автомобіль|легков(ий|ого)|транспортний засіб|(?:^|[^а-яіїєґА-ЯІЇЄҐa-zA-Z])авто(?:[^а-яіїєґА-ЯІЇЄҐa-zA-Z]|$)`)
+	reSkip     = regexp.MustCompile(`(?i)право оренди|земельн(а|их|ої) ділян|брухт|металобрухт|право вимоги|майнов(і|их) прав`)
 	reLandOnly = regexp.MustCompile(`(?i)земельн`)
 )
 
@@ -62,7 +64,7 @@ func Classify(title, description, classID string) Attrs {
 		}
 	}
 
-	if reSkip.MatchString(text) && !reApt.MatchString(text) && !reCar.MatchString(text) {
+	if reSkip.MatchString(text) && !reApt.MatchString(text) && !reHouse.MatchString(text) && !reCar.MatchString(text) {
 		a.Kind = KindSkip
 		a.Confidence = 0.9
 		return a
@@ -73,7 +75,7 @@ func Classify(title, description, classID string) Attrs {
 		return a
 	}
 
-	if reCar.MatchString(text) || brandIn(text) != "" || reVIN.MatchString(text) {
+	if reCar.MatchString(text) || brandIn(text) != "" || hasVIN(text) {
 		a.Kind = KindCar
 		if a.Confidence < 0.75 {
 			a.Confidence = 0.8
@@ -91,7 +93,7 @@ func Classify(title, description, classID string) Attrs {
 	}
 
 	if m := reYear.FindStringSubmatch(text); len(m) > 1 {
-		if y, err := strconv.Atoi(m[1]); err == nil && y >= 1970 && y <= 2026 {
+		if y, err := strconv.Atoi(m[1]); err == nil && y >= 1970 && y <= time.Now().Year()+1 {
 			a.Year = y
 			a.Confidence += 0.05
 		}
@@ -121,6 +123,20 @@ func Classify(title, description, classID string) Attrs {
 		a.Confidence = 1
 	}
 	return a
+}
+
+// hasVIN keeps IBANs and account numbers out: a bare code counts only when it
+// carries a letter, and ASCII \b stops a 17-char window inside a longer run.
+func hasVIN(text string) bool {
+	if reVIN.MatchString(text) {
+		return true
+	}
+	for _, m := range reVINCode.FindAllString(text, -1) {
+		if strings.ContainsAny(m, "ABCDEFGHJKLMNPRSTUVWXYZ") {
+			return true
+		}
+	}
+	return false
 }
 
 func roomsIn(text string) int {

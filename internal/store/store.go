@@ -20,6 +20,9 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
+// finished lots are dead ends: never rescored, never listed.
+const notFinished = ` AND COALESCE(p.status,'') NOT IN ('complete','cancelled','unsuccessful','deleted')`
+
 type Store struct {
 	Pool *pgxpool.Pool
 }
@@ -56,10 +59,45 @@ func (s *Store) Cursor(ctx context.Context, fallback time.Time) time.Time {
 }
 
 func (s *Store) SetCursor(ctx context.Context, t time.Time) error {
+	return s.setMeta(ctx, "date_modified", t.UTC().Format(time.RFC3339Nano))
+}
+
+func (s *Store) setMeta(ctx context.Context, key, value string) error {
 	_, err := s.Pool.Exec(ctx, `
-		INSERT INTO meta(key,value) VALUES('date_modified',$1)
-		ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`, t.UTC().Format(time.RFC3339Nano))
+		INSERT INTO meta(key,value) VALUES($1,$2)
+		ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value`, key, value)
 	return err
+}
+
+func (s *Store) metaValue(ctx context.Context, key string) (string, error) {
+	var v string
+	err := s.Pool.QueryRow(ctx, `SELECT value FROM meta WHERE key=$1`, key).Scan(&v)
+	if err == pgx.ErrNoRows {
+		return "", nil
+	}
+	return v, err
+}
+
+// ChargeRIA spends one freemium average_price slot. Cache hits must not call this.
+func (s *Store) ChargeRIA(ctx context.Context, now time.Time) error {
+	hourB, monthB := ria.HourBucket(now), ria.MonthBucket(now)
+	hourStored, err := s.metaValue(ctx, "ria_hour")
+	if err != nil {
+		return err
+	}
+	monthStored, err := s.metaValue(ctx, "ria_month")
+	if err != nil {
+		return err
+	}
+	hourN := ria.ParseCount(hourStored, hourB)
+	monthN := ria.ParseCount(monthStored, monthB)
+	if !ria.Allow(hourN, monthN) {
+		return ria.ErrBudget
+	}
+	if err := s.setMeta(ctx, "ria_hour", ria.FormatCount(hourB, hourN+1)); err != nil {
+		return err
+	}
+	return s.setMeta(ctx, "ria_month", ria.FormatCount(monthB, monthN+1))
 }
 
 func (s *Store) UpsertProcedure(ctx context.Context, p prozorro.Procedure, raw json.RawMessage) error {
@@ -82,7 +120,7 @@ func (s *Store) UpsertProcedure(ctx context.Context, p prozorro.Procedure, raw j
 			selling_method=EXCLUDED.selling_method,
 			selling_entity=EXCLUDED.selling_entity,
 			status=EXCLUDED.status,
-			start_amount=EXCLUDED.start_amount,
+			start_amount=COALESCE(NULLIF(procedures.start_amount, 0), EXCLUDED.start_amount),
 			currency=EXCLUDED.currency,
 			title=EXCLUDED.title,
 			description=EXCLUDED.description,
@@ -104,7 +142,7 @@ func (s *Store) Unmatched(ctx context.Context, limit int) ([]Row, error) {
 		       p.auction_start, p.date_modified, COALESCE(p.previous_auction_id,''), COALESCE(p.tender_attempts,0)
 		FROM procedures p
 		LEFT JOIN lot_attrs a ON a.procedure_id=p.id
-		WHERE a.procedure_id IS NULL
+		WHERE a.procedure_id IS NULL`+notFinished+`
 		ORDER BY p.date_modified DESC NULLS LAST
 		LIMIT $1`, limit)
 	if err != nil {
@@ -144,6 +182,21 @@ func (s *Store) SaveScore(ctx context.Context, id string, discount *float64, pas
 	return err
 }
 
+// MarkAlerted claims the lot for a single notification; false means someone already sent it.
+func (s *Store) MarkAlerted(ctx context.Context, id string) (bool, error) {
+	tag, err := s.Pool.Exec(ctx, `UPDATE scores SET alerted_at=now() WHERE procedure_id=$1 AND alerted_at IS NULL`, id)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// ReleaseAlert hands a claim back after a failed send; Match is single-flight, so nothing can race it.
+func (s *Store) ReleaseAlert(ctx context.Context, id string) error {
+	_, err := s.Pool.Exec(ctx, `UPDATE scores SET alerted_at=NULL WHERE procedure_id=$1`, id)
+	return err
+}
+
 func (s *Store) StaleScores(ctx context.Context, limit int) ([]Row, error) {
 	rows, err := s.Pool.Query(ctx, `
 		SELECT p.id, p.auction_id, p.selling_method, COALESCE(p.selling_entity,''), COALESCE(p.status,''),
@@ -152,8 +205,7 @@ func (s *Store) StaleScores(ctx context.Context, limit int) ([]Row, error) {
 		FROM procedures p
 		JOIN lot_attrs a ON a.procedure_id=p.id
 		LEFT JOIN scores s ON s.procedure_id=p.id
-		WHERE a.kind IN ('car','apt')
-		  AND COALESCE(p.status,'') NOT IN ('complete','cancelled','unsuccessful','deleted')
+		WHERE a.kind IN ('car','apt')`+notFinished+`
 		  AND (s.scored_at IS NULL OR s.scored_at < now() - interval '24 hours')
 		ORDER BY p.date_modified DESC NULLS LAST
 		LIMIT $1`, limit)
@@ -272,7 +324,7 @@ func (s *Store) List(ctx context.Context, f Filter) ([]Row, error) {
 		FROM procedures p
 		JOIN lot_attrs a ON a.procedure_id=p.id
 		LEFT JOIN scores s ON s.procedure_id=p.id
-		WHERE a.kind IN ('car','apt')`
+		WHERE a.kind IN ('car','apt')` + notFinished
 	args := []any{}
 	n := 1
 	if f.Kind != "" {

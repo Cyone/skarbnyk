@@ -20,7 +20,7 @@
       <dt>Ринок RIA</dt><dd>{{if .Lot.RIAMedian}}{{printf "%.0f" (deref .Lot.RIAMedian)}} грн{{else}}немає оцінки{{end}}</dd>
       <dt>Знижка</dt><dd>{{if .Lot.Discount}}{{printf "%.0f" (percent .Lot.Discount)}}%{{else}}—{{end}}</dd>
       <dt>Впевненість</dt><dd>{{printf "%.0f" (mul .Lot.Confidence 100)}}%</dd>
-      <dt>Тип</dt><dd>{{.Lot.Kind}}</dd>
+      <dt>Тип</dt><dd>{{kindUA .Lot.Kind}}</dd>
       <dt>Захід</dt><dd>{{.Lot.Family}} · прохід {{.Lot.PassN}}</dd>
       <dt>Метод</dt><dd>{{.Lot.SellingMethod}}</dd>
       <dt>Організатор</dt><dd>{{.Lot.SellingEntity}}</dd>

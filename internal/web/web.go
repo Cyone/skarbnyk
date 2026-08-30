@@ -3,6 +3,7 @@ package web
 import (
 	"embed"
 	"html/template"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -35,7 +36,8 @@ func New(st *store.Store) (*Server, error) {
 			}
 			return *p * 100
 		},
-		"mul": func(a, b float64) float64 { return a * b },
+		"mul":    func(a, b float64) float64 { return a * b },
+		"kindUA": kindUA,
 	}).ParseFS(tmplFS, "templates/*.html")
 	if err != nil {
 		return nil, err
@@ -66,7 +68,8 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	}
 	lots, err := s.Store.List(r.Context(), f)
 	if err != nil {
-		http.Error(w, err.Error(), 500)
+		log.Printf("list: %v", err)
+		http.Error(w, "внутрішня помилка", 500)
 		return
 	}
 	data := map[string]any{"Lots": lots, "Filter": f}
@@ -76,7 +79,8 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.T.ExecuteTemplate(w, name, data); err != nil {
-		http.Error(w, err.Error(), 500)
+		log.Printf("render %s: %v", name, err)
+		http.Error(w, "внутрішня помилка", 500)
 	}
 }
 
@@ -93,6 +97,18 @@ func (s *Server) detail(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.T.ExecuteTemplate(w, "detail", map[string]any{"Lot": lot, "Official": official}); err != nil {
-		http.Error(w, err.Error(), 500)
+		log.Printf("render detail: %v", err)
+		http.Error(w, "внутрішня помилка", 500)
+	}
+}
+
+func kindUA(k string) string {
+	switch k {
+	case "car":
+		return "авто"
+	case "apt":
+		return "квартира"
+	default:
+		return k
 	}
 }

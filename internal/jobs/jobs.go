@@ -3,9 +3,11 @@ package jobs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"skarbnyk/internal/parse"
@@ -16,11 +18,13 @@ import (
 )
 
 type Runner struct {
-	Store  *store.Store
-	PZ     *prozorro.Client
-	RIA    *ria.Client
-	USD    float64
-	Since  time.Time
+	Store *store.Store
+	PZ    *prozorro.Client
+	RIA   *ria.Client
+	USD   float64
+	Since time.Time
+
+	matching sync.Mutex
 }
 
 func (r *Runner) Start(ctx context.Context) {
@@ -77,9 +81,14 @@ func (r *Runner) Poll(ctx context.Context) error {
 		}
 		pages++
 		if max.IsZero() || !max.After(from) {
-			return r.Store.SetCursor(ctx, from.Add(time.Millisecond))
+			if len(raws) >= 100 {
+				// ponytail: a full page that does not advance would loop forever; step past the
+				// boundary and accept losing records sharing that millisecond.
+				return r.Store.SetCursor(ctx, from.Add(time.Millisecond))
+			}
+			return r.Store.SetCursor(ctx, from)
 		}
-		from = max.Add(time.Microsecond)
+		from = max
 		if err := r.Store.SetCursor(ctx, from); err != nil {
 			return err
 		}
@@ -96,6 +105,11 @@ func (r *Runner) Poll(ctx context.Context) error {
 }
 
 func (r *Runner) Match(ctx context.Context) error {
+	if !r.matching.TryLock() {
+		log.Print("match: previous run still in flight, skipping")
+		return nil
+	}
+	defer r.matching.Unlock()
 	rows, err := r.Store.Unmatched(ctx, 200)
 	if err != nil {
 		return err
@@ -118,12 +132,19 @@ func (r *Runner) Match(ctx context.Context) error {
 		}
 		family := score.Family(row.SellingMethod)
 		pass := score.PassN(row.TenderAttempts, row.PreviousID)
-		if a.Kind == parse.KindSkip || a.Confidence < 0.6 || r.RIA == nil || r.RIA.Key == "" {
+		if a.Kind == parse.KindSkip || a.Confidence < 0.6 || r.RIA == nil || r.RIA.Key == "" ||
+			!priceable(a, markaID) || (row.Currency != "" && row.Currency != "UAH") {
 			_ = r.Store.SaveScore(ctx, row.ID, nil, pass, family, 0)
 			continue
 		}
 		sn, err := r.price(ctx, a, markaID)
 		if err != nil {
+			if errors.Is(err, ria.ErrBudget) {
+				log.Printf("ria: %v", err)
+				// Leave the lot unmatched so the next hour can retry.
+				_, _ = r.Store.Pool.Exec(ctx, `DELETE FROM lot_attrs WHERE procedure_id=$1`, row.ID)
+				return nil
+			}
 			log.Printf("ria %s: %v", row.ID, err)
 			_ = r.Store.SaveScore(ctx, row.ID, nil, pass, family, 0)
 			continue
@@ -137,7 +158,21 @@ func (r *Runner) Match(ctx context.Context) error {
 			log.Printf("score %s: %v", row.ID, err)
 			continue
 		}
-		alert(row, a, d, market)
+		if !alertWorthy(a, d) {
+			continue
+		}
+		claimed, err := r.Store.MarkAlerted(ctx, row.ID)
+		if err != nil {
+			log.Printf("alert claim %s: %v", row.ID, err)
+			continue
+		}
+		if !claimed || alert(ctx, row, d, market) {
+			continue
+		}
+		// A cancelled ctx killed the send too, so release on a fresh one or the lot never alerts.
+		if err := r.Store.ReleaseAlert(context.WithoutCancel(ctx), row.ID); err != nil {
+			log.Printf("alert release %s: %v", row.ID, err)
+		}
 	}
 	return nil
 }
@@ -171,12 +206,31 @@ func (r *Runner) rescore(ctx context.Context) error {
 	return r.Match(ctx)
 }
 
+func specHash(a parse.Attrs, markaID int) string {
+	if a.Kind == parse.KindCar {
+		// ponytail: model is never resolved, so car medians stay marka-wide until a model dict exists.
+		return ria.SpecHash("car", markaID, a.Year)
+	}
+	// ponytail: no city dimension until a DIM.RIA city dict exists; medians stay national.
+	return ria.SpecHash("apt", a.Rooms)
+}
+
+func priceable(a parse.Attrs, markaID int) bool {
+	if a.Kind == parse.KindCar {
+		return markaID > 0 && a.Year > 0
+	}
+	return a.Rooms > 0
+}
+
 func (r *Runner) price(ctx context.Context, a parse.Attrs, markaID int) (ria.Snapshot, error) {
-	h := ria.SpecHash(string(a.Kind), markaID, 0, a.Year, 0)
+	h := specHash(a, markaID)
 	if sn, ok, err := r.Store.Snapshot(ctx, h); err != nil {
 		return ria.Snapshot{}, err
 	} else if ok {
 		return sn, nil
+	}
+	if err := r.Store.ChargeRIA(ctx, time.Now()); err != nil {
+		return ria.Snapshot{}, err
 	}
 	var (
 		sn  ria.Snapshot
@@ -190,7 +244,9 @@ func (r *Runner) price(ctx context.Context, a parse.Attrs, markaID int) (ria.Sna
 	if err != nil {
 		return sn, err
 	}
-	_ = r.Store.SaveSnapshot(ctx, h, sn)
+	if err := r.Store.SaveSnapshot(ctx, h, sn); err != nil {
+		log.Printf("snapshot %s: %v", h, err)
+	}
 	return sn, nil
 }
 

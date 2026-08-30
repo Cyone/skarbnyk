@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -8,21 +9,28 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"skarbnyk/internal/parse"
 	"skarbnyk/internal/store"
 )
 
-func alert(row store.Row, a parse.Attrs, discount, market float64) {
+func alertWorthy(a parse.Attrs, discount float64) bool {
+	if os.Getenv("TELEGRAM_BOT_TOKEN") == "" || os.Getenv("TELEGRAM_CHAT_ID") == "" {
+		return false
+	}
+	return a.Confidence >= envFloat("ALERT_MIN_CONFIDENCE", 0.6) && discount >= envFloat("ALERT_MIN_DISCOUNT", 0.25)
+}
+
+// telegram never uses http.DefaultClient: an untimed send would hold the Match mutex forever.
+var telegram = &http.Client{Timeout: 10 * time.Second}
+
+// alert reports whether the message reached Telegram, so a failed send can be retried.
+func alert(ctx context.Context, row store.Row, discount, market float64) bool {
 	token := os.Getenv("TELEGRAM_BOT_TOKEN")
 	chat := os.Getenv("TELEGRAM_CHAT_ID")
 	if token == "" || chat == "" {
-		return
-	}
-	minD := envFloat("ALERT_MIN_DISCOUNT", 0.25)
-	minC := envFloat("ALERT_MIN_CONFIDENCE", 0.6)
-	if a.Confidence < minC || discount < minD {
-		return
+		return false
 	}
 	title := row.Title
 	if title == "" {
@@ -32,12 +40,23 @@ func alert(row store.Row, a parse.Attrs, discount, market float64) {
 		discount*100, title, row.StartAmount, row.Currency, market, row.AuctionID)
 	u := "https://api.telegram.org/bot" + token + "/sendMessage"
 	form := url.Values{"chat_id": {chat}, "text": {text}}
-	res, err := http.PostForm(u, form)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, strings.NewReader(form.Encode()))
 	if err != nil {
-		log.Printf("telegram: %v", err)
-		return
+		log.Printf("telegram: %s", strings.ReplaceAll(err.Error(), token, "***"))
+		return false
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	res, err := telegram.Do(req)
+	if err != nil {
+		log.Printf("telegram: %s", strings.ReplaceAll(err.Error(), token, "***"))
+		return false
 	}
 	res.Body.Close()
+	if res.StatusCode != 200 {
+		log.Printf("telegram %s: %d", row.ID, res.StatusCode)
+		return false
+	}
+	return true
 }
 
 func envFloat(key string, fallback float64) float64 {

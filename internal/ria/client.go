@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -34,15 +35,17 @@ type Mark struct {
 	Name string
 }
 
-func SpecHash(kind string, markaID, modelID, year, cityID int) string {
-	s := fmt.Sprintf("%s/%d/%d/%d/%d", kind, markaID, modelID, year, cityID)
+func SpecHash(kind string, parts ...int) string {
+	s := kind
+	for _, p := range parts {
+		s += "/" + strconv.Itoa(p)
+	}
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])
 }
 
 func (c *Client) Marks(ctx context.Context) ([]Mark, error) {
-	q := url.Values{"api_key": {c.Key}}
-	raw, err := c.get(ctx, "https://developers.ria.com/auto/categories/1/marks?"+q.Encode())
+	raw, err := c.get(ctx, "https://developers.ria.com/auto/categories/1/marks", url.Values{})
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +64,7 @@ func (c *Client) Marks(ctx context.Context) ([]Mark, error) {
 }
 
 func (c *Client) AverageCar(ctx context.Context, markaID, modelID, year int) (Snapshot, error) {
-	q := url.Values{"api_key": {c.Key}}
+	q := url.Values{}
 	if markaID > 0 {
 		q.Set("marka_id", strconv.Itoa(markaID))
 	}
@@ -71,12 +74,11 @@ func (c *Client) AverageCar(ctx context.Context, markaID, modelID, year int) (Sn
 	if year > 0 {
 		q.Add("yers", strconv.Itoa(year))
 	}
-	return c.average(ctx, "https://developers.ria.com/auto/average_price?"+q.Encode(), "USD")
+	return c.average(ctx, "https://developers.ria.com/auto/average_price", q, "USD")
 }
 
 func (c *Client) AverageApt(ctx context.Context, cityID, rooms int) (Snapshot, error) {
 	q := url.Values{
-		"api_key":      {c.Key},
 		"category":     {"1"},
 		"sub_category": {"2"},
 		"operation":    {"1"},
@@ -89,20 +91,20 @@ func (c *Client) AverageApt(ctx context.Context, cityID, rooms int) (Snapshot, e
 	if rooms > 0 {
 		q.Set("rooms_count", strconv.Itoa(rooms))
 	}
-	return c.average(ctx, "https://developers.ria.com/dom/average_price?"+q.Encode(), "UAH")
+	return c.average(ctx, "https://developers.ria.com/dom/average_price", q, "UAH")
 }
 
-func (c *Client) average(ctx context.Context, u, currency string) (Snapshot, error) {
-	raw, err := c.get(ctx, u)
+func (c *Client) average(ctx context.Context, endpoint string, q url.Values, currency string) (Snapshot, error) {
+	raw, err := c.get(ctx, endpoint, q)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	var body struct {
-		Total           int     `json:"total"`
-		ArithmeticMean  float64 `json:"arithmeticMean"`
-		InterQuartile   float64 `json:"interQuartileMean"`
-		Percentiles     map[string]float64 `json:"percentiles"`
-		Message         string  `json:"message"`
+		Total          int                `json:"total"`
+		ArithmeticMean float64            `json:"arithmeticMean"`
+		InterQuartile  float64            `json:"interQuartileMean"`
+		Percentiles    map[string]float64 `json:"percentiles"`
+		Message        string             `json:"message"`
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return Snapshot{}, err
@@ -120,24 +122,37 @@ func (c *Client) average(ctx context.Context, u, currency string) (Snapshot, err
 	return Snapshot{Median: med, Arithmetic: body.ArithmeticMean, Currency: currency}, nil
 }
 
-func (c *Client) get(ctx context.Context, u string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+func (c *Client) get(ctx context.Context, endpoint string, q url.Values) ([]byte, error) {
+	q.Set("api_key", c.Key)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint+"?"+q.Encode(), nil)
 	if err != nil {
-		return nil, err
+		return nil, c.scrub(err)
 	}
 	res, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, c.scrub(err)
 	}
 	defer res.Body.Close()
 	b, err := io.ReadAll(res.Body)
 	if err != nil {
-		return nil, err
+		return nil, c.scrub(err)
 	}
 	if res.StatusCode != 200 {
-		return nil, fmt.Errorf("ria %d: %s", res.StatusCode, string(b))
+		return nil, fmt.Errorf("ria %d: %s", res.StatusCode, c.redact(string(b)))
 	}
 	return b, nil
+}
+
+// scrub drops the wrapped error: *url.Error prints the request URL, api_key included.
+func (c *Client) scrub(err error) error {
+	return errors.New(c.redact(err.Error()))
+}
+
+func (c *Client) redact(s string) string {
+	if c.Key == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, c.Key, "***")
 }
 
 func MatchMark(name string, marks []Mark) int {
