@@ -16,8 +16,8 @@
     <a href="/lots/{{.ID}}">{{or .Title .AuctionID}}</a>
     <div class="muted">{{.City}} {{if .Brand}}· {{.Brand}}{{end}} {{if .Year}}· {{.Year}}{{end}} {{if .Rooms}}· {{.Rooms}} кімн.{{end}}</div>
   </td>
-  <td>{{printf "%.0f" .StartAmount}} {{.Currency}}</td>
-  <td>{{if .RIAMedian}}{{printf "%.0f" (deref .RIAMedian)}} грн{{else}}—{{end}}</td>
+  <td class="num">{{printf "%.0f" .StartAmount}} {{.Currency}}</td>
+  <td class="num">{{if .RIAMedian}}{{printf "%.0f" (deref .RIAMedian)}} грн{{else}}—{{end}}</td>
   <td>
     <span class="tag">{{or .Family "—"}}</span>
     {{if gt .PassN 1}}<span class="tag">прохід {{.PassN}}</span>{{end}}

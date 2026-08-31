@@ -190,3 +190,86 @@ func titleCase(s string) string {
 	r[0] = unicode.ToUpper(r[0])
 	return string(r)
 }
+
+var (
+	rePlaceType = regexp.MustCompile(`(?i)^(смт\.?|с-ще|селище міського типу|селище|село|місто|м\.|с\.)\s*`)
+	hromadaSuf  = []string{
+		" міська територіальна громада",
+		" сільська територіальна громада",
+		" селищна територіальна громада",
+		" територіальна громада",
+		" міська громада",
+		" сільська громада",
+		" селищна громада",
+		" сільська рада",
+		" селищна рада",
+	}
+)
+
+// Settlement turns a Prozorro locality / KOATUU name into a filterable town.
+func Settlement(locality, official string) string {
+	loc := foldUA(strings.TrimSpace(locality))
+	off := foldUA(strings.TrimSpace(official))
+	if strings.Contains(loc, "/") {
+		if s := placeFrom(loc); s != "" {
+			return s
+		}
+	}
+	if strings.Contains(off, "/") && !strings.Contains(strings.ToLower(off), "область") {
+		if s := placeFrom(off); s != "" {
+			return s
+		}
+	}
+	if s := placeFrom(loc); s != "" {
+		return s
+	}
+	return placeFrom(off)
+}
+
+func foldUA(s string) string {
+	s = strings.ReplaceAll(s, "i", "і")
+	return strings.ReplaceAll(s, "I", "І")
+}
+
+func placeFrom(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if i := strings.LastIndex(s, "/"); i >= 0 {
+		s = strings.TrimSpace(s[i+1:])
+	}
+	low := strings.ToLower(s)
+	for _, suf := range hromadaSuf {
+		if strings.HasSuffix(low, suf) {
+			s = strings.TrimSpace(s[:len(s)-len(suf)])
+			break
+		}
+	}
+	if m := rePlaceType.FindStringIndex(s); m != nil && m[0] == 0 {
+		s = strings.TrimSpace(s[m[1]:])
+	}
+	low = strings.ToLower(s)
+	if s == "" || strings.Contains(low, "район") || strings.Contains(low, "область") ||
+		strings.HasSuffix(low, "рада") {
+		return ""
+	}
+	return titleUA(s)
+}
+
+func titleUA(s string) string {
+	parts := strings.Fields(strings.ToLower(strings.TrimSpace(s)))
+	for i, p := range parts {
+		bits := strings.Split(p, "-")
+		for j, b := range bits {
+			r := []rune(b)
+			if len(r) == 0 {
+				continue
+			}
+			r[0] = unicode.ToUpper(r[0])
+			bits[j] = string(r)
+		}
+		parts[i] = strings.Join(bits, "-")
+	}
+	return strings.Join(parts, " ")
+}

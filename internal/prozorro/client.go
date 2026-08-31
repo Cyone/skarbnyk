@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"skarbnyk/internal/parse"
 )
 
 const Base = "https://procedure.prozorro.sale"
@@ -20,6 +22,26 @@ func New() *Client {
 }
 
 type Loc map[string]string
+
+func (l *Loc) UnmarshalJSON(b []byte) error {
+	if string(b) == "null" || len(b) == 0 {
+		return nil
+	}
+	if b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		*l = Loc{"uk_UA": s}
+		return nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	*l = m
+	return nil
+}
 
 func (l Loc) UK() string {
 	if l == nil {
@@ -57,6 +79,13 @@ type Procedure struct {
 		Classification struct {
 			ID string `json:"id"`
 		} `json:"classification"`
+		Address struct {
+			Locality  Loc `json:"locality"`
+			AddressID struct {
+				ID   string `json:"id"`
+				Name Loc    `json:"name"`
+			} `json:"addressID"`
+		} `json:"address"`
 	} `json:"items"`
 	AuctionPeriod struct {
 		StartDate string `json:"startDate"`
@@ -75,6 +104,15 @@ func (p Procedure) ClassID() string {
 		return ""
 	}
 	return p.Items[0].Classification.ID
+}
+
+func (p Procedure) AddressCity() string {
+	for _, it := range p.Items {
+		if s := parse.Settlement(it.Address.Locality.UK(), it.Address.AddressID.Name.UK()); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 func (p Procedure) Text() (title, desc string) {

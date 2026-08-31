@@ -1,0 +1,30 @@
+{{define "results"}}
+<div id="results">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Знижка</th>
+          <th>Лот</th>
+          <th>Старт</th>
+          <th>Ринок</th>
+          <th>Захід</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{template "rows" .}}
+      </tbody>
+    </table>
+  </div>
+  <nav class="pager">
+    {{if gt .Page 1}}<a href="{{.Prev}}" hx-get="{{.Prev}}" hx-target="#results" hx-swap="outerHTML" hx-push-url="true">Назад</a>{{end}}
+    <span>Сторінка {{.Page}} з {{.Pages}}</span>
+    {{if lt .Page .Pages}}<a href="{{.Next}}" hx-get="{{.Next}}" hx-target="#results" hx-swap="outerHTML" hx-push-url="true">Далі</a>{{end}}
+    <label class="per-page">На сторінці
+      <select name="n" id="per-page" hx-get="/" hx-include=".filters" hx-target="#results" hx-swap="outerHTML" hx-push-url="true">
+        {{range .PageSizes}}<option value="{{.}}" {{if eq $.Limit .}}selected{{end}}>{{.}}</option>{{end}}
+      </select>
+    </label>
+  </nav>
+</div>
+{{end}}

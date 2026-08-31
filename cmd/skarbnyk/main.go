@@ -80,7 +80,7 @@ func main() {
 	_ = h.Shutdown(shutdown)
 }
 
-// redactPassword keeps a pgx DSN parse failure from printing the database password.
+// redactPassword keeps a DSN parse failure from printing the database password.
 func redactPassword(msg, dsn string) string {
 	u, err := url.Parse(dsn)
 	if err != nil {

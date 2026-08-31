@@ -35,6 +35,7 @@ func (r *Runner) Start(ctx context.Context) {
 		_ = r.Poll(ctx)
 		_ = r.RefreshDicts(ctx)
 		_ = r.Match(ctx)
+		_ = r.BackfillCities(ctx)
 	}()
 }
 
@@ -117,14 +118,18 @@ func (r *Runner) Match(ctx context.Context) error {
 	marks, _ := r.Store.Marks(ctx)
 	for _, row := range rows {
 		classID := ""
-		var raw json.RawMessage
-		_ = r.Store.Pool.QueryRow(ctx, `SELECT raw FROM procedures WHERE id=$1`, row.ID).Scan(&raw)
+		var p prozorro.Procedure
+		raw, _ := r.Store.ProcedureRaw(ctx, row.ID)
 		if len(raw) > 0 {
-			if p, err := prozorro.Decode(raw); err == nil {
+			if decoded, err := prozorro.Decode(raw); err == nil {
+				p = decoded
 				classID = p.ClassID()
 			}
 		}
 		a := parse.Classify(row.Title, row.Description, classID)
+		if c := p.AddressCity(); c != "" {
+			a.City = c
+		}
 		markaID := ria.MatchMark(a.Brand, marks)
 		if err := r.Store.SaveAttrs(ctx, row.ID, a, markaID, 0, 0); err != nil {
 			log.Printf("attrs %s: %v", row.ID, err)
@@ -142,7 +147,7 @@ func (r *Runner) Match(ctx context.Context) error {
 			if errors.Is(err, ria.ErrBudget) {
 				log.Printf("ria: %v", err)
 				// Leave the lot unmatched so the next hour can retry.
-				_, _ = r.Store.Pool.Exec(ctx, `DELETE FROM lot_attrs WHERE procedure_id=$1`, row.ID)
+				_ = r.Store.DeleteAttrs(ctx, row.ID)
 				return nil
 			}
 			log.Printf("ria %s: %v", row.ID, err)
@@ -181,7 +186,10 @@ func (r *Runner) Refresh(ctx context.Context) error {
 	if err := r.RefreshDicts(ctx); err != nil {
 		return err
 	}
-	if _, err := r.Store.Pool.Exec(ctx, `DELETE FROM price_snapshots WHERE fetched_at < now() - interval '24 hours'`); err != nil {
+	if err := r.BackfillCities(ctx); err != nil {
+		return err
+	}
+	if err := r.Store.DeleteOldSnapshots(ctx); err != nil {
 		return err
 	}
 	return r.rescore(ctx)
@@ -200,7 +208,7 @@ func (r *Runner) rescore(ctx context.Context) error {
 	for _, row := range rows {
 		ids = append(ids, row.ID)
 	}
-	if _, err := r.Store.Pool.Exec(ctx, `DELETE FROM lot_attrs WHERE procedure_id = ANY($1)`, ids); err != nil {
+	if err := r.Store.DeleteAttrs(ctx, ids...); err != nil {
 		return err
 	}
 	return r.Match(ctx)
@@ -248,6 +256,42 @@ func (r *Runner) price(ctx context.Context, a parse.Attrs, markaID int) (ria.Sna
 		log.Printf("snapshot %s: %v", h, err)
 	}
 	return sn, nil
+}
+
+func (r *Runner) BackfillCities(ctx context.Context) error {
+	done, err := r.Store.CitiesFromAddressDone(ctx)
+	if err != nil {
+		return err
+	}
+	if done {
+		return nil
+	}
+	n := 0
+	err = r.Store.EachAddressed(ctx, func(id string, raw json.RawMessage) error {
+		p, err := prozorro.Decode(raw)
+		if err != nil {
+			log.Printf("city decode %s: %v", id, err)
+			return nil
+		}
+		c := p.AddressCity()
+		if c == "" {
+			return nil
+		}
+		changed, err := r.Store.SetCity(ctx, id, c)
+		if err != nil {
+			return err
+		}
+		n += int(changed)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if err := r.Store.MarkCitiesFromAddress(ctx); err != nil {
+		return err
+	}
+	log.Printf("cities: %d from address", n)
+	return nil
 }
 
 func (r *Runner) RefreshDicts(ctx context.Context) error {

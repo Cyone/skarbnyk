@@ -33,3 +33,32 @@ func TestDecodeAndFamilyHints(t *testing.T) {
 		t.Fatal("title")
 	}
 }
+
+func TestAddressCity(t *testing.T) {
+	raw := []byte(`{
+		"items":[{
+			"address":{
+				"locality":{"uk_UA":"Ємільчинський район/смт ємільчине"},
+				"addressID":{"id":"1821700000","name":{"uk_UA":"ЄМІЛЬЧИНСЬКИЙ РАЙОН/СМТ ЄМІЛЬЧИНЕ"},"scheme":"koatuu"}
+			}
+		}]
+	}`)
+	p, err := Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.AddressCity() != "Ємільчине" {
+		t.Fatalf("city=%q", p.AddressCity())
+	}
+}
+
+func TestAddressCityStringLocality(t *testing.T) {
+	raw := []byte(`{"items":[{"address":{"locality":"Київ","addressID":{"name":""}}}]}`)
+	p, err := Decode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.AddressCity() != "Київ" {
+		t.Fatalf("city=%q", p.AddressCity())
+	}
+}
